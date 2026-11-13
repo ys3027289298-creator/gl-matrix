@@ -5,7 +5,7 @@
 @author Colin MacKenzie IV
 @version 3.4.4
 
-Copyright (c) 2015-2025, Brandon Jones, Colin MacKenzie IV.
+Copyright (c) 2015-2026, Brandon Jones, Colin MacKenzie IV.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -95,7 +95,11 @@ THE SOFTWARE.
    */
   function equals$9(a, b) {
     var tolerance = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : EPSILON;
-    return Math.abs(a - b) <= tolerance * Math.max(1, Math.abs(a), Math.abs(b));
+    // `a === b` handles exactly-equal values (including matching infinities),
+    // while clamping the relative scale to Number.MAX_VALUE prevents an infinite
+    // operand from producing an infinite tolerance (which would make differing
+    // infinities, or a finite value and an infinity, compare as approximately equal).
+    return a === b || Math.abs(a - b) <= tolerance * Math.min(Number.MAX_VALUE, Math.max(1, Math.abs(a), Math.abs(b)));
   }
 
   var common = /*#__PURE__*/Object.freeze({
@@ -2999,13 +3003,13 @@ THE SOFTWARE.
     var is2 = 1 / scaling[1];
     var is3 = 1 / scaling[2];
     var sm11 = mat[0] * is1;
-    var sm12 = mat[1] * is2;
-    var sm13 = mat[2] * is3;
-    var sm21 = mat[4] * is1;
+    var sm12 = mat[1] * is1;
+    var sm13 = mat[2] * is1;
+    var sm21 = mat[4] * is2;
     var sm22 = mat[5] * is2;
-    var sm23 = mat[6] * is3;
-    var sm31 = mat[8] * is1;
-    var sm32 = mat[9] * is2;
+    var sm23 = mat[6] * is2;
+    var sm31 = mat[8] * is3;
+    var sm32 = mat[9] * is3;
     var sm33 = mat[10] * is3;
     var trace = sm11 + sm22 + sm33;
     var S = 0;
@@ -3066,13 +3070,13 @@ THE SOFTWARE.
     var is2 = 1 / out_s[1];
     var is3 = 1 / out_s[2];
     var sm11 = m11 * is1;
-    var sm12 = m12 * is2;
-    var sm13 = m13 * is3;
-    var sm21 = m21 * is1;
+    var sm12 = m12 * is1;
+    var sm13 = m13 * is1;
+    var sm21 = m21 * is2;
     var sm22 = m22 * is2;
-    var sm23 = m23 * is3;
-    var sm31 = m31 * is1;
-    var sm32 = m32 * is2;
+    var sm23 = m23 * is2;
+    var sm31 = m31 * is3;
+    var sm32 = m32 * is3;
     var sm33 = m33 * is3;
     var trace = sm11 + sm22 + sm33;
     var S = 0;
@@ -3395,6 +3399,83 @@ THE SOFTWARE.
       out[10] = -1;
       out[14] = -near;
     }
+    return out;
+  }
+
+  /**
+   * Generates a perspective projection matrix with a far plane at infinity.
+   * The near clip plane and field of view are configurable while the far
+   * plane is pushed to infinity, so geometry at any distance stays inside the
+   * frustum instead of being clipped away.
+   * The near/far clip planes correspond to a normalized device coordinate Z
+   * range of [-1, 1], which matches WebGL/OpenGL's clip volume.
+   *
+   * @param {mat4} out mat4 frustum matrix will be written into
+   * @param {number} fovy Vertical field of view in radians
+   * @param {number} aspect Aspect ratio. typically viewport width/height
+   * @param {number} near Near bound of the frustum, must be a finite number strictly greater than 0
+   * @returns {mat4} out
+   */
+  function perspectiveInfiniteNO(out, fovy, aspect, near) {
+    if (!(near > 0) || near === Infinity || near === -Infinity) {
+      throw new Error('near must be a finite number greater than 0');
+    }
+    var f = 1.0 / Math.tan(fovy / 2);
+    out[0] = f / aspect;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+    out[4] = 0;
+    out[5] = f;
+    out[6] = 0;
+    out[7] = 0;
+    out[8] = 0;
+    out[9] = 0;
+    out[10] = -1;
+    out[11] = -1;
+    out[12] = 0;
+    out[13] = 0;
+    out[14] = -2 * near;
+    out[15] = 0;
+    return out;
+  }
+
+  /**
+   * Generates a perspective projection matrix with a far plane at infinity,
+   * suitable for WebGPU.
+   * The near clip plane and field of view are configurable while the far
+   * plane is pushed to infinity, so geometry at any distance stays inside the
+   * frustum instead of being clipped away.
+   * The near/far clip planes correspond to a normalized device coordinate Z
+   * range of [0, 1], which matches WebGPU/Vulkan/DirectX/Metal's clip volume.
+   *
+   * @param {mat4} out mat4 frustum matrix will be written into
+   * @param {number} fovy Vertical field of view in radians
+   * @param {number} aspect Aspect ratio. typically viewport width/height
+   * @param {number} near Near bound of the frustum, must be a finite number strictly greater than 0
+   * @returns {mat4} out
+   */
+  function perspectiveInfiniteZO(out, fovy, aspect, near) {
+    if (!(near > 0) || near === Infinity || near === -Infinity) {
+      throw new Error('near must be a finite number greater than 0');
+    }
+    var f = 1.0 / Math.tan(fovy / 2);
+    out[0] = f / aspect;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+    out[4] = 0;
+    out[5] = f;
+    out[6] = 0;
+    out[7] = 0;
+    out[8] = 0;
+    out[9] = 0;
+    out[10] = -1;
+    out[11] = -1;
+    out[12] = 0;
+    out[13] = 0;
+    out[14] = -near;
+    out[15] = 0;
     return out;
   }
 
@@ -3885,6 +3966,8 @@ THE SOFTWARE.
     perspectiveNO: perspectiveNO,
     perspective: perspective,
     perspectiveZO: perspectiveZO,
+    perspectiveInfiniteNO: perspectiveInfiniteNO,
+    perspectiveInfiniteZO: perspectiveInfiniteZO,
     perspectiveFromFieldOfView: perspectiveFromFieldOfView,
     orthoNO: orthoNO,
     ortho: ortho,
@@ -4313,8 +4396,8 @@ THE SOFTWARE.
   function slerp$1(out, a, b, t) {
     var angle = Math.acos(Math.min(Math.max(dot$4(a, b), -1), 1));
     var sinTotal = Math.sin(angle);
-    var ratioA = Math.sin((1 - t) * angle) / sinTotal;
-    var ratioB = Math.sin(t * angle) / sinTotal;
+    var ratioA = sinTotal > EPSILON ? Math.sin((1 - t) * angle) / sinTotal : 1 - t;
+    var ratioB = sinTotal > EPSILON ? Math.sin(t * angle) / sinTotal : t;
     out[0] = ratioA * a[0] + ratioB * b[0];
     out[1] = ratioA * a[1] + ratioB * b[1];
     out[2] = ratioA * a[2] + ratioB * b[2];
@@ -4614,7 +4697,7 @@ THE SOFTWARE.
     var b0 = b[0],
       b1 = b[1],
       b2 = b[2];
-    return Math.abs(a0 - b0) <= EPSILON * Math.max(1.0, Math.abs(a0), Math.abs(b0)) && Math.abs(a1 - b1) <= EPSILON * Math.max(1.0, Math.abs(a1), Math.abs(b1)) && Math.abs(a2 - b2) <= EPSILON * Math.max(1.0, Math.abs(a2), Math.abs(b2));
+    return (a0 === b0 || Math.abs(a0 - b0) <= EPSILON * Math.min(Number.MAX_VALUE, Math.max(1.0, Math.abs(a0), Math.abs(b0)))) && (a1 === b1 || Math.abs(a1 - b1) <= EPSILON * Math.min(Number.MAX_VALUE, Math.max(1.0, Math.abs(a1), Math.abs(b1)))) && (a2 === b2 || Math.abs(a2 - b2) <= EPSILON * Math.min(Number.MAX_VALUE, Math.max(1.0, Math.abs(a2), Math.abs(b2))));
   }
 
   /**
@@ -5324,7 +5407,7 @@ THE SOFTWARE.
       b1 = b[1],
       b2 = b[2],
       b3 = b[3];
-    return Math.abs(a0 - b0) <= EPSILON * Math.max(1.0, Math.abs(a0), Math.abs(b0)) && Math.abs(a1 - b1) <= EPSILON * Math.max(1.0, Math.abs(a1), Math.abs(b1)) && Math.abs(a2 - b2) <= EPSILON * Math.max(1.0, Math.abs(a2), Math.abs(b2)) && Math.abs(a3 - b3) <= EPSILON * Math.max(1.0, Math.abs(a3), Math.abs(b3));
+    return (a0 === b0 || Math.abs(a0 - b0) <= EPSILON * Math.min(Number.MAX_VALUE, Math.max(1.0, Math.abs(a0), Math.abs(b0)))) && (a1 === b1 || Math.abs(a1 - b1) <= EPSILON * Math.min(Number.MAX_VALUE, Math.max(1.0, Math.abs(a1), Math.abs(b1)))) && (a2 === b2 || Math.abs(a2 - b2) <= EPSILON * Math.min(Number.MAX_VALUE, Math.max(1.0, Math.abs(a2), Math.abs(b2)))) && (a3 === b3 || Math.abs(a3 - b3) <= EPSILON * Math.min(Number.MAX_VALUE, Math.max(1.0, Math.abs(a3), Math.abs(b3))));
   }
 
   /**
@@ -5524,7 +5607,7 @@ THE SOFTWARE.
    * @return {Number}     Angle, in radians, of the rotation
    */
   function getAxisAngle(out_axis, q) {
-    var rad = Math.acos(q[3]) * 2.0;
+    var rad = Math.acos(Math.min(Math.max(q[3], -1), 1)) * 2.0;
     var s = Math.sin(rad / 2.0);
     if (s > EPSILON) {
       out_axis[0] = q[0] / s;
@@ -5548,7 +5631,7 @@ THE SOFTWARE.
    */
   function getAngle(a, b) {
     var dotproduct = dot$2(a, b);
-    return Math.acos(2 * dotproduct * dotproduct - 1);
+    return Math.acos(Math.min(Math.max(2 * dotproduct * dotproduct - 1, -1), 1));
   }
 
   /**
@@ -7651,7 +7734,7 @@ THE SOFTWARE.
       a1 = a[1];
     var b0 = b[0],
       b1 = b[1];
-    return Math.abs(a0 - b0) <= EPSILON * Math.max(1.0, Math.abs(a0), Math.abs(b0)) && Math.abs(a1 - b1) <= EPSILON * Math.max(1.0, Math.abs(a1), Math.abs(b1));
+    return (a0 === b0 || Math.abs(a0 - b0) <= EPSILON * Math.min(Number.MAX_VALUE, Math.max(1.0, Math.abs(a0), Math.abs(b0)))) && (a1 === b1 || Math.abs(a1 - b1) <= EPSILON * Math.min(Number.MAX_VALUE, Math.max(1.0, Math.abs(a1), Math.abs(b1))));
   }
 
   /**

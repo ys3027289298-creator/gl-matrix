@@ -1112,13 +1112,13 @@ export function getRotation(out, mat) {
   var is2 = 1 / scaling[1];
   var is3 = 1 / scaling[2];
   var sm11 = mat[0] * is1;
-  var sm12 = mat[1] * is2;
-  var sm13 = mat[2] * is3;
-  var sm21 = mat[4] * is1;
+  var sm12 = mat[1] * is1;
+  var sm13 = mat[2] * is1;
+  var sm21 = mat[4] * is2;
   var sm22 = mat[5] * is2;
-  var sm23 = mat[6] * is3;
-  var sm31 = mat[8] * is1;
-  var sm32 = mat[9] * is2;
+  var sm23 = mat[6] * is2;
+  var sm31 = mat[8] * is3;
+  var sm32 = mat[9] * is3;
   var sm33 = mat[10] * is3;
   var trace = sm11 + sm22 + sm33;
   var S = 0;
@@ -1179,13 +1179,13 @@ export function decompose(out_r, out_t, out_s, mat) {
   var is2 = 1 / out_s[1];
   var is3 = 1 / out_s[2];
   var sm11 = m11 * is1;
-  var sm12 = m12 * is2;
-  var sm13 = m13 * is3;
-  var sm21 = m21 * is1;
+  var sm12 = m12 * is1;
+  var sm13 = m13 * is1;
+  var sm21 = m21 * is2;
   var sm22 = m22 * is2;
-  var sm23 = m23 * is3;
-  var sm31 = m31 * is1;
-  var sm32 = m32 * is2;
+  var sm23 = m23 * is2;
+  var sm31 = m31 * is3;
+  var sm32 = m32 * is3;
   var sm33 = m33 * is3;
   var trace = sm11 + sm22 + sm33;
   var S = 0;
@@ -1508,6 +1508,83 @@ export function perspectiveZO(out, fovy, aspect, near, far) {
     out[10] = -1;
     out[14] = -near;
   }
+  return out;
+}
+
+/**
+ * Generates a perspective projection matrix with a far plane at infinity.
+ * The near clip plane and field of view are configurable while the far
+ * plane is pushed to infinity, so geometry at any distance stays inside the
+ * frustum instead of being clipped away.
+ * The near/far clip planes correspond to a normalized device coordinate Z
+ * range of [-1, 1], which matches WebGL/OpenGL's clip volume.
+ *
+ * @param {mat4} out mat4 frustum matrix will be written into
+ * @param {number} fovy Vertical field of view in radians
+ * @param {number} aspect Aspect ratio. typically viewport width/height
+ * @param {number} near Near bound of the frustum, must be a finite number strictly greater than 0
+ * @returns {mat4} out
+ */
+export function perspectiveInfiniteNO(out, fovy, aspect, near) {
+  if (!(near > 0) || near === Infinity || near === -Infinity) {
+    throw new Error('near must be a finite number greater than 0');
+  }
+  var f = 1.0 / Math.tan(fovy / 2);
+  out[0] = f / aspect;
+  out[1] = 0;
+  out[2] = 0;
+  out[3] = 0;
+  out[4] = 0;
+  out[5] = f;
+  out[6] = 0;
+  out[7] = 0;
+  out[8] = 0;
+  out[9] = 0;
+  out[10] = -1;
+  out[11] = -1;
+  out[12] = 0;
+  out[13] = 0;
+  out[14] = -2 * near;
+  out[15] = 0;
+  return out;
+}
+
+/**
+ * Generates a perspective projection matrix with a far plane at infinity,
+ * suitable for WebGPU.
+ * The near clip plane and field of view are configurable while the far
+ * plane is pushed to infinity, so geometry at any distance stays inside the
+ * frustum instead of being clipped away.
+ * The near/far clip planes correspond to a normalized device coordinate Z
+ * range of [0, 1], which matches WebGPU/Vulkan/DirectX/Metal's clip volume.
+ *
+ * @param {mat4} out mat4 frustum matrix will be written into
+ * @param {number} fovy Vertical field of view in radians
+ * @param {number} aspect Aspect ratio. typically viewport width/height
+ * @param {number} near Near bound of the frustum, must be a finite number strictly greater than 0
+ * @returns {mat4} out
+ */
+export function perspectiveInfiniteZO(out, fovy, aspect, near) {
+  if (!(near > 0) || near === Infinity || near === -Infinity) {
+    throw new Error('near must be a finite number greater than 0');
+  }
+  var f = 1.0 / Math.tan(fovy / 2);
+  out[0] = f / aspect;
+  out[1] = 0;
+  out[2] = 0;
+  out[3] = 0;
+  out[4] = 0;
+  out[5] = f;
+  out[6] = 0;
+  out[7] = 0;
+  out[8] = 0;
+  out[9] = 0;
+  out[10] = -1;
+  out[11] = -1;
+  out[12] = 0;
+  out[13] = 0;
+  out[14] = -near;
+  out[15] = 0;
   return out;
 }
 

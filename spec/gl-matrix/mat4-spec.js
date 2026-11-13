@@ -2,6 +2,7 @@ import * as glMatrix from "../../src/common.js"
 import * as mat4 from "../../src/mat4.js"
 import * as quat from "../../src/quat.js"
 import * as vec3 from "../../src/vec3.js"
+import assert from 'assert';
 
 function buildMat4Tests() {
     return function() {
@@ -805,6 +806,82 @@ function buildMat4Tests() {
                     0, 0, -1, -1,
                     0, 0, -0.2, 0
                 ]); });
+            });
+        });
+
+        describe("perspectiveInfiniteNO", function() {
+            let fovy = 45 * Math.PI / 180.0;
+            let aspect = 640 / 480;
+            beforeEach(function() { result = mat4.perspectiveInfiniteNO(out, fovy, aspect, 0.1); });
+            it("should calculate the infinite projection matrix (NDC z in [-1, 1])", function() {
+                expect(result).toBeEqualish([
+                    1.81066, 0, 0, 0,
+                    0, 2.414213, 0, 0,
+                    0, 0, -1, -1,
+                    0, 0, -0.2, 0
+                ]);
+            });
+            it("should return out", function() { expect(result).toBe(out); });
+            it("should be bit-identical to perspectiveNO with far=Infinity", function() {
+                let legacy = mat4.perspectiveNO(new Float32Array(16), fovy, aspect, 0.1, Infinity);
+                for (let i = 0; i < 16; i++) {
+                    assert.strictEqual(result[i], legacy[i], `element ${i} differs`);
+                }
+            });
+            it("should only differ from a finite perspective matrix in the depth terms", function() {
+                let finite = mat4.perspectiveNO(new Float32Array(16), fovy, aspect, 0.1, 200);
+                let differing = [];
+                for (let i = 0; i < 16; i++) {
+                    if (result[i] !== finite[i]) differing.push(i);
+                }
+                assert.deepStrictEqual(differing, [10, 14]);
+            });
+            it("should map the near plane to NDC z = -1 and approach z = 1 at distance", function() {
+                let nearPoint = vec3.transformMat4(new Float32Array(3), [0, 0, -0.1], result);
+                assert.ok(Math.abs(nearPoint[2] - -1) < 1e-6);
+                let farPoint = vec3.transformMat4(new Float32Array(3), [0, 0, -1e6], result);
+                assert.ok(farPoint[2] < 1 && farPoint[2] > 0.999999);
+            });
+            [0, -0.1, NaN, Infinity, -Infinity].forEach(function(badNear) {
+                it(`should throw when near is ${badNear}`, function() {
+                    assert.throws(function() {
+                        mat4.perspectiveInfiniteNO(new Float32Array(16), fovy, aspect, badNear);
+                    }, /near must be a finite number greater than 0/);
+                });
+            });
+        });
+
+        describe("perspectiveInfiniteZO", function() {
+            let fovy = 45 * Math.PI / 180.0;
+            let aspect = 640 / 480;
+            beforeEach(function() { result = mat4.perspectiveInfiniteZO(out, fovy, aspect, 0.1); });
+            it("should calculate the infinite projection matrix (NDC z in [0, 1])", function() {
+                expect(result).toBeEqualish([
+                    1.81066, 0, 0, 0,
+                    0, 2.414213, 0, 0,
+                    0, 0, -1, -1,
+                    0, 0, -0.1, 0
+                ]);
+            });
+            it("should return out", function() { expect(result).toBe(out); });
+            it("should be bit-identical to perspectiveZO with far=Infinity", function() {
+                let legacy = mat4.perspectiveZO(new Float32Array(16), fovy, aspect, 0.1, Infinity);
+                for (let i = 0; i < 16; i++) {
+                    assert.strictEqual(result[i], legacy[i], `element ${i} differs`);
+                }
+            });
+            it("should map the near plane to NDC z = 0 and approach z = 1 at distance", function() {
+                let nearPoint = vec3.transformMat4(new Float32Array(3), [0, 0, -0.1], result);
+                assert.ok(Math.abs(nearPoint[2]) < 1e-6);
+                let farPoint = vec3.transformMat4(new Float32Array(3), [0, 0, -1e6], result);
+                assert.ok(farPoint[2] < 1 && farPoint[2] > 0.999999);
+            });
+            [0, -0.1, NaN, Infinity, -Infinity].forEach(function(badNear) {
+                it(`should throw when near is ${badNear}`, function() {
+                    assert.throws(function() {
+                        mat4.perspectiveInfiniteZO(new Float32Array(16), fovy, aspect, badNear);
+                    }, /near must be a finite number greater than 0/);
+                });
             });
         });
 

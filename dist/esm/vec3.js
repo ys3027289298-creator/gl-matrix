@@ -410,8 +410,8 @@ export function lerp(out, a, b, t) {
 export function slerp(out, a, b, t) {
   var angle = Math.acos(Math.min(Math.max(dot(a, b), -1), 1));
   var sinTotal = Math.sin(angle);
-  var ratioA = Math.sin((1 - t) * angle) / sinTotal;
-  var ratioB = Math.sin(t * angle) / sinTotal;
+  var ratioA = sinTotal > glMatrix.EPSILON ? Math.sin((1 - t) * angle) / sinTotal : 1 - t;
+  var ratioB = sinTotal > glMatrix.EPSILON ? Math.sin(t * angle) / sinTotal : t;
   out[0] = ratioA * a[0] + ratioB * b[0];
   out[1] = ratioA * a[1] + ratioB * b[1];
   out[2] = ratioA * a[2] + ratioB * b[2];
@@ -711,7 +711,7 @@ export function equals(a, b) {
   var b0 = b[0],
     b1 = b[1],
     b2 = b[2];
-  return Math.abs(a0 - b0) <= glMatrix.EPSILON * Math.max(1.0, Math.abs(a0), Math.abs(b0)) && Math.abs(a1 - b1) <= glMatrix.EPSILON * Math.max(1.0, Math.abs(a1), Math.abs(b1)) && Math.abs(a2 - b2) <= glMatrix.EPSILON * Math.max(1.0, Math.abs(a2), Math.abs(b2));
+  return (a0 === b0 || Math.abs(a0 - b0) <= glMatrix.EPSILON * Math.min(Number.MAX_VALUE, Math.max(1.0, Math.abs(a0), Math.abs(b0)))) && (a1 === b1 || Math.abs(a1 - b1) <= glMatrix.EPSILON * Math.min(Number.MAX_VALUE, Math.max(1.0, Math.abs(a1), Math.abs(b1)))) && (a2 === b2 || Math.abs(a2 - b2) <= glMatrix.EPSILON * Math.min(Number.MAX_VALUE, Math.max(1.0, Math.abs(a2), Math.abs(b2))));
 }
 
 /**
