@@ -55,6 +55,22 @@ global.expect = function(e) {
         toBeLessThan: function(a) {
             assert(e < a);
         },
+        toThrowError: function(matcher) {
+            let threw = false;
+            let message = "";
+            try {
+                e();
+            } catch (err) {
+                threw = true;
+                message = err.message;
+            }
+            if (!threw) {
+                assert.fail("expected function to throw an error");
+            }
+            if (matcher instanceof RegExp && !matcher.test(message)) {
+                assert.fail(message, matcher.toString(), "error message mismatch");
+            }
+        },
         /*
            Returns true if `actual` has the same length as `expected`, and
            if each element of both arrays is within 0.000001 of each other.

@@ -1002,6 +1002,182 @@ function buildMat4Tests() {
             beforeEach(function() { result = mat4.frob(matA); });
             it("should return the Frobenius Norm of the matrix", function() { expect(result).toBeEqualish( Math.sqrt(Math.pow(1, 2) + Math.pow(1, 2) + Math.pow(1, 2) + Math.pow(1, 2) + Math.pow(1, 2) + Math.pow(2, 2) + Math.pow(3, 2) )); });
        });
+
+    describe("obliqueFromPlane", function() {
+        // Section plane tilted 20 degrees about X through p0 = (0, 0, -1)
+        const angle = 20 * Math.PI / 180;
+        const normal = [0, Math.sin(angle), -Math.cos(angle)];
+        const pointOnPlane = [0, 0, -1];
+        let oblique, twice, drift;
+
+        beforeEach(function() {
+            oblique = mat4.create();
+            twice = mat4.create();
+            mat4.obliqueFromPlane(oblique, normal, pointOnPlane, null);
+            mat4.multiply(twice, oblique, oblique);
+            drift = 0;
+            for (let i = 0; i < 16; i++) {
+                drift = Math.max(drift, Math.abs(oblique[i] - twice[i]));
+            }
+        });
+
+        it("should be an affine matrix with a unit homogeneous row", function() {
+            expect([oblique[3], oblique[7], oblique[11], oblique[15]]).toBeEqualish([0, 0, 0, 1]);
+        });
+
+        it("should match the closed-form Q = I - d*n^T/(n.d) construction", function() {
+            const nLen = Math.hypot(normal[0], normal[1], normal[2]);
+            const n = normal.map((v) => v / nLen);
+            let d = [1 - n[0], -n[1], -n[2]];
+            const dLen = Math.hypot(d[0], d[1], d[2]);
+            d = d.map((v) => v / dLen);
+            const nd = n[0] * d[0] + n[1] * d[1] + n[2] * d[2];
+            const offset = n[0] * pointOnPlane[0] + n[1] * pointOnPlane[1] + n[2] * pointOnPlane[2];
+            const expected = mat4.create();
+            for (let col = 0; col < 3; col++) {
+                for (let row = 0; row < 3; row++) {
+                    expected[col * 4 + row] = (row === col ? 1 : 0) - d[row] * n[col] / nd;
+                }
+            }
+            expected[12] = d[0] * offset / nd;
+            expected[13] = d[1] * offset / nd;
+            expected[14] = d[2] * offset / nd;
+            expect(oblique).toBeEqualish(expected);
+        });
+
+        it("should be idempotent (reused twice with only rounding-level drift)", function() {
+            // Float32 storage: drift must stay at the single-precision round-off floor.
+            expect(drift).toBeLessThan(1e-6);
+        });
+
+        it("should fix every point lying on the plane", function() {
+            const onPlane = [1, 0, -0.5];
+            onPlane[1] =
+                (normal[2] * (pointOnPlane[2] - onPlane[2])) / normal[1] + pointOnPlane[1];
+            const transformed = vec3.transformMat4(vec3.create(), onPlane, oblique);
+            expect(transformed).toBeEqualish(onPlane);
+        });
+
+        it("should build bit-identical matrices for repeated calls", function() {
+            const again = mat4.create();
+            mat4.obliqueFromPlane(again, normal, pointOnPlane, null);
+            expect(mat4.exactEquals(oblique, again)).toBe(true);
+        });
+
+        it("should compose with the existing ortho chain without modifying inputs", function() {
+            const orthoMatrix = mat4.ortho(mat4.create(), -4, 4, -4, 4, 0.45, 6);
+            const snapshot = oblique.slice();
+            const chained = mat4.multiply(mat4.create(), orthoMatrix, oblique);
+            expect(chained[15]).toBe(1);
+            expect(oblique.slice()).toBeEqualish(snapshot);
+        });
+
+        it("should keep an on-plane vertex that an axis-aligned near plane would cull", function() {
+            // Section vertex on the oblique plane but in front of the z = -1 near plane.
+            const sectionVertex = [1, 0, -0.5];
+            sectionVertex[1] =
+                (normal[2] * (pointOnPlane[2] - sectionVertex[2])) / normal[1] + pointOnPlane[1];
+
+            const naive = mat4.ortho(mat4.create(), -4, 4, -4, 4, 1, 5);
+            // Fit the ortho volume to the sheared scene (AABB + 5% margin) so the
+            // oblique chain never removes a vertex that survives the oblique step.
+            const sheared = vec3.transformMat4(vec3.create(), sectionVertex, oblique);
+            const margin = 0.05;
+            const adjusted = mat4.ortho(
+                mat4.create(),
+                sheared[0] - margin, sheared[0] + margin,
+                sheared[1] - margin, sheared[1] + margin,
+                -sheared[2] - margin, -sheared[2] + margin
+            );
+            const chained = mat4.multiply(mat4.create(), adjusted, oblique);
+
+            const insideClip = (m, p) => {
+                const x = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12];
+                const y = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13];
+                const z = m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14];
+                const w = m[15];
+                return -w <= z && z <= w && -w <= x && x <= w && -w <= y && y <= w;
+            };
+
+            expect(insideClip(naive, sectionVertex)).toBe(false);
+            expect(insideClip(chained, sectionVertex)).toBe(true);
+        });
+
+        it("should throw on a degenerate (zero-length) plane normal", function() {
+            expect(function() {
+                mat4.obliqueFromPlane(mat4.create(), [0, 0, 0], pointOnPlane, null);
+            }).toThrowError(/degenerate plane/);
+        });
+
+        it("should throw on a zero-length projector", function() {
+            expect(function() {
+                mat4.obliqueFromPlane(mat4.create(), normal, pointOnPlane, [0, 0, 0]);
+            }).toThrowError(/degenerate projector/);
+        });
+
+        it("should throw when the projector is parallel to the plane", function() {
+            const edge = [1, 0, 0]; // n . (1,0,0) = 0 for this normal
+            expect(function() {
+                mat4.obliqueFromPlane(mat4.create(), normal, pointOnPlane, edge);
+            }).toThrowError(/parallel to the plane/);
+        });
+    });
+
+    describe("obliqueFromQuad", function() {
+        const angle = 20 * Math.PI / 180;
+        const normal = [0, Math.sin(angle), -Math.cos(angle)];
+        const p0 = [0, 0, -1];
+        const onPlane = (x, z) => [
+            x,
+            (normal[2] * (p0[2] - z)) / normal[1] + p0[1],
+            z
+        ];
+
+        it("should produce the same matrix as obliqueFromPlane for a coplanar quad", function() {
+            const quad = [
+                onPlane(-1, -0.5), onPlane(1, -0.5),
+                onPlane(1, -2.5), onPlane(-1, -2.5)
+            ];
+            const fromQuad = mat4.create();
+            const fromPlane = mat4.create();
+            mat4.obliqueFromQuad(fromQuad, quad[0], quad[1], quad[2], quad[3], null);
+            mat4.obliqueFromPlane(fromPlane, normal, p0, null);
+            expect(fromQuad).toBeEqualish(fromPlane);
+        });
+
+        it("should be bit-identical for the same winding, including repeated calls", function() {
+            const quad = [
+                onPlane(-1, -0.5), onPlane(1, -0.5),
+                onPlane(1, -2.5), onPlane(-1, -2.5)
+            ];
+            const first = mat4.create();
+            const second = mat4.create();
+            mat4.obliqueFromQuad(first, quad[0], quad[1], quad[2], quad[3], null);
+            mat4.obliqueFromQuad(second, quad[0], quad[1], quad[2], quad[3], null);
+            expect(mat4.exactEquals(first, second)).toBe(true);
+        });
+
+        it("should throw when three points are collinear (degenerate plane)", function() {
+            const a = [0, 0, 0], b = [1, 0, 0], c = [2, 0, 0], d = [0, 1, 0];
+            expect(function() {
+                mat4.obliqueFromQuad(mat4.create(), a, b, c, d, null);
+            }).toThrowError(/collinear|degenerate plane/);
+        });
+
+        it("should throw when duplicate points collapse the plane", function() {
+            const a = [0, 0, 0], b = [0, 0, 0], c = [0, 1, 0], d = [1, 1, 0];
+            expect(function() {
+                mat4.obliqueFromQuad(mat4.create(), a, b, c, d, null);
+            }).toThrowError(/collinear|degenerate plane/);
+        });
+
+        it("should throw when the four points are not coplanar", function() {
+            const a = [0, 0, 0], b = [1, 0, 0], c = [0, 1, 0], d = [0, 0, 1];
+            expect(function() {
+                mat4.obliqueFromQuad(mat4.create(), a, b, c, d, null);
+            }).toThrowError(/not coplanar/);
+        });
+    });
     };
 
     describe("add", function() {

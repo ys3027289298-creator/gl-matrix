@@ -1728,6 +1728,162 @@ export function orthoZO(out, left, right, bottom, top, near, far) {
 }
 
 /**
+ * Builds an oblique (parallel) projection matrix that projects points onto
+ * the plane defined by normal `normal` and point `pointOnPlane`, along the
+ * projector direction `projector`, without clipping geometry that lies on or
+ * behind an axis-aligned near clip plane.
+ *
+ * The result is an affine, idempotent (Q * Q = Q up to floating point
+ * rounding) matrix in the same column-major layout as every other mat4 in
+ * this module, so it composes directly with the existing projection chain via
+ * {@link module:mat4.multiply}: `finalProjection = ortho(...) * oblique(...)`.
+ * Points on the input plane are fixed by the matrix, therefore no vertex of
+ * the oblique near plane is ever removed by the oblique step itself.
+ *
+ * Throws when the plane is degenerate (zero normal) or when the projector is
+ * degenerate or parallel to the plane.
+ *
+ * @param {mat4} out mat4 the oblique projection is written into
+ * @param {ReadonlyVec3} normal Plane normal (need not be normalized)
+ * @param {ReadonlyVec3} pointOnPlane Any point lying on the plane
+ * @param {ReadonlyVec3} [projector] Projector direction. Defaults to the
+ *        cavalier direction normalize(camera-right - normal); pass null/
+ *        undefined to use it
+ * @returns {mat4} out
+ */
+export function obliqueFromPlane(out, normal, pointOnPlane, projector) {
+  let nx = normal[0];
+  let ny = normal[1];
+  let nz = normal[2];
+  let nLen = Math.hypot(nx, ny, nz);
+  if (!Number.isFinite(nLen) || nLen < glMatrix.EPSILON) {
+    throw new Error(
+      "mat4.obliqueFromPlane: degenerate plane, normal length is zero"
+    );
+  }
+  nx /= nLen;
+  ny /= nLen;
+  nz /= nLen;
+
+  let dx;
+  let dy;
+  let dz;
+  if (projector == null) {
+    // Camera-right (1, 0, 0) minus the normalized normal: always non-parallel
+    // to the plane and a stable cavalier-oblique default.
+    dx = 1 - nx;
+    dy = -ny;
+    dz = -nz;
+  } else {
+    dx = projector[0];
+    dy = projector[1];
+    dz = projector[2];
+  }
+  let dLen = Math.hypot(dx, dy, dz);
+  if (!Number.isFinite(dLen) || dLen < glMatrix.EPSILON) {
+    throw new Error(
+      "mat4.obliqueFromPlane: degenerate projector, direction length is zero"
+    );
+  }
+  dx /= dLen;
+  dy /= dLen;
+  dz /= dLen;
+
+  const nd = nx * dx + ny * dy + nz * dz;
+  if (Math.abs(nd) < glMatrix.EPSILON) {
+    throw new Error(
+      "mat4.obliqueFromPlane: projector is parallel to the plane"
+    );
+  }
+
+  const planeOffset =
+    nx * pointOnPlane[0] + ny * pointOnPlane[1] + nz * pointOnPlane[2];
+  const invNd = 1 / nd;
+
+  // Q = | I - d*n^T / (n.d)    d * (n.p0) / (n.d) |
+  //     | 0                      1                  |
+  out[0] = 1 - dx * nx * invNd;
+  out[1] = -dy * nx * invNd;
+  out[2] = -dz * nx * invNd;
+  out[3] = 0;
+  out[4] = -dx * ny * invNd;
+  out[5] = 1 - dy * ny * invNd;
+  out[6] = -dz * ny * invNd;
+  out[7] = 0;
+  out[8] = -dx * nz * invNd;
+  out[9] = -dy * nz * invNd;
+  out[10] = 1 - dz * nz * invNd;
+  out[11] = 0;
+  out[12] = dx * planeOffset * invNd;
+  out[13] = dy * planeOffset * invNd;
+  out[14] = dz * planeOffset * invNd;
+  out[15] = 1;
+  return out;
+}
+
+/**
+ * Builds an oblique (parallel) projection matrix from the four corners of an
+ * oblique near plane. The corners must be coplanar and must span a genuine
+ * plane (the first three may not be collinear).
+ *
+ * This is a convenience wrapper around
+ * {@link module:mat4.obliqueFromPlane}: the plane normal is derived from
+ * `(p1 - p0) x (p2 - p0)` and `p0` is used as the point on the plane. The
+ * winding of p0, p1, p2 therefore chooses the normal direction; reversing the
+ * winding flips the normal and the default projector, which mirrors the
+ * projected result. Pass an explicit `projector` or a consistently ordered
+ * quad when bit-identical output across calls is required.
+ *
+ * Throws when the four points are collinear, define a degenerate (zero-area)
+ * plane, are non-coplanar, or produce a degenerate/parallel projector.
+ *
+ * @param {mat4} out mat4 the oblique projection is written into
+ * @param {ReadonlyVec3} p0 First corner of the near plane
+ * @param {ReadonlyVec3} p1 Second corner
+ * @param {ReadonlyVec3} p2 Third corner
+ * @param {ReadonlyVec3} p3 Fourth corner (coplanarity checked against p0..p2)
+ * @param {ReadonlyVec3} [projector] Projector direction, see
+ *        {@link module:mat4.obliqueFromPlane}
+ * @returns {mat4} out
+ */
+export function obliqueFromQuad(out, p0, p1, p2, p3, projector) {
+  const e1x = p1[0] - p0[0];
+  const e1y = p1[1] - p0[1];
+  const e1z = p1[2] - p0[2];
+  const e2x = p2[0] - p0[0];
+  const e2y = p2[1] - p0[1];
+  const e2z = p2[2] - p0[2];
+
+  const nx = e1y * e2z - e1z * e2y;
+  const ny = e1z * e2x - e1x * e2z;
+  const nz = e1x * e2y - e1y * e2x;
+  if (
+    !Number.isFinite(nx) ||
+    !Number.isFinite(ny) ||
+    !Number.isFinite(nz) ||
+    Math.hypot(nx, ny, nz) < glMatrix.EPSILON
+  ) {
+    throw new Error(
+      "mat4.obliqueFromQuad: points are collinear or define a degenerate plane"
+    );
+  }
+
+  const e3x = p3[0] - p0[0];
+  const e3y = p3[1] - p0[1];
+  const e3z = p3[2] - p0[2];
+  const triple = nx * e3x + ny * e3y + nz * e3z;
+  const edgeScale =
+    Math.hypot(e1x, e1y, e1z) * Math.hypot(e2x, e2y, e2z) || 1;
+  if (Math.abs(triple) > glMatrix.EPSILON * edgeScale) {
+    throw new Error(
+      "mat4.obliqueFromQuad: four points are not coplanar"
+    );
+  }
+
+  return obliqueFromPlane(out, [nx, ny, nz], p0, projector);
+}
+
+/**
  * Generates a look-at matrix with the given eye position, focal point, and up axis.
  * If you want a matrix that actually makes an object look at another object, you should use targetTo instead.
  *
